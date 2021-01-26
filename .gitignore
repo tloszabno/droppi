@@ -2,3 +2,4 @@
 mytokens.py
 .idea
 .vscode
+db.sqlite
