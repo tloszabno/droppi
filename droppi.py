@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 
-import dropbox
+import logging
 import os
 import sqlite3
-import dateutil.parser
-
-from mytokens import DROPBOX_TOKEN
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+import dateutil.parser
+import dropbox
+
 import config
+
+log = logging.getLogger(__name__)
+log.setLevel(config.LOG_LEVEL)
+
 
 @dataclass
 class DbxFile(object):
@@ -20,7 +24,7 @@ class DbxFile(object):
 
 
 def is_image(file_name: str):
-    return file_name.lower().endswith(tuple(config.IMAGE_EXTENTIONS))
+    return file_name.lower().endswith(tuple(config.IMAGE_EXTENSIONS))
 
 
 def list_photo_files(dbx, path):
@@ -30,13 +34,14 @@ def list_photo_files(dbx, path):
 
 def has_been_downloaded(connection, dbx_file):
     cursor = connection.cursor()
-    result = cursor.execute('SELECT COUNT(1) FROM DOWNLOADS WHERE REMOTE_PATH=? AND HASH=?', (dbx_file.path, dbx_file.hash,))
+    cursor.execute('SELECT COUNT(1) FROM DOWNLOADS WHERE REMOTE_PATH=? AND HASH=?', (dbx_file.path, dbx_file.hash,))
     count = cursor.fetchone()[0]
     return count > 0
 
 
 def should_be_deleted(connection, dbx_file):
-    result = connection.cursor().execute('SELECT TIMESTAMP FROM DOWNLOADS WHERE REMOTE_PATH=? AND HASH=?', (dbx_file.path, dbx_file.hash,))
+    result = connection.cursor().execute('SELECT TIMESTAMP FROM DOWNLOADS WHERE REMOTE_PATH=? AND HASH=?',
+                                         (dbx_file.path, dbx_file.hash,))
     for row in result:
         timestamp = dateutil.parser.parse(row[0])
         timestamp_threshold = datetime.now() - timedelta(days=config.DAYS_TO_REMOVE_AFTER_DOWNLOAD)
@@ -45,7 +50,7 @@ def should_be_deleted(connection, dbx_file):
 
 
 def mark_downloaded(connection, file, local_path):
-    print("[OK]")
+    log.info(f"Downloaded file {file} to {local_path}")
     params = (
         file.name,
         file.path,
@@ -62,6 +67,7 @@ def mark_downloaded(connection, file, local_path):
     ''', params)
     connection.commit()
 
+
 def create_target_path(fs_path, file):
     target = os.path.join(fs_path, file.name)
     counter = 0
@@ -70,20 +76,23 @@ def create_target_path(fs_path, file):
         counter += 1
     return target
 
+
 def download(dbx, file, fs_path, conn):
-    print("Downloading file %s" % file.name)
+    log.debug("Downloading file %s" % file.name)
     target = create_target_path(fs_path, file)
     dbx.files_download_to_file(target, file.path)
     if os.path.isfile(target):
         if os.path.getsize(target) == file.size:
             mark_downloaded(conn, file, target)
 
+
 def delete(dbx, file):
-    print("Deleting file %s" % file.path)
+    log.info("Deleting file %s" % file.path)
     dbx.files_delete_v2(file.path)
 
 
-def check_files(dropbox_token, dropbox_path, fs_path, conn):
+def handle_config_path(dropbox_token, dropbox_path, fs_path, conn):
+    log.info(f"Going with dropbox_path={dropbox_path} and fs_path={fs_path}")
     with dropbox.Dropbox(dropbox_token) as dbx:
         dbx.users_get_current_account()
         for file in list_photo_files(dbx, dropbox_path):
@@ -93,10 +102,10 @@ def check_files(dropbox_token, dropbox_path, fs_path, conn):
                 delete(dbx, file)
 
 
-with sqlite3.connect(config.DB_PATH) as conn:
-    cursor = conn.cursor()
-    print("__init_db__ creating table if not created before")
-    cursor.execute('''CREATE TABLE IF NOT EXISTS DOWNLOADS
+def main():
+    with sqlite3.connect(config.DB_PATH) as conn:
+        log.info("Creating table if not created before")
+        conn.cursor().execute('''CREATE TABLE IF NOT EXISTS DOWNLOADS
                   (ID           INTEGER PRIMARY KEY AUTOINCREMENT,
                   NAME          TEXT    NOT NULL,
                   REMOTE_PATH   TEXT    NOT NULL,
@@ -104,10 +113,12 @@ with sqlite3.connect(config.DB_PATH) as conn:
                   SIZE          REAL    NOT NULL,
                   HASH          TEXT    NOT NULL,
                   TIMESTAMP     TEXT    NOT NULL);''')
-    conn.commit()
+        conn.commit()
 
-    for config_paths in config.PATHS_CONFIGURATION:
-        (dropbox_path, fs_path) = config_paths
-        check_files(DROPBOX_TOKEN, dropbox_path, fs_path, conn)
+        for config_paths in config.PATHS_CONFIGURATION:
+            (dropbox_path, fs_path) = config_paths
+            handle_config_path(config.DROPBOX_TOKEN, dropbox_path, fs_path, conn)
 
 
+if __name__ == '__main__':
+    main()
