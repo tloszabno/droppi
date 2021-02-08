@@ -23,13 +23,13 @@ class DbxFile(object):
     size: float
 
 
-def is_image(file_name: str):
-    return file_name.lower().endswith(tuple(config.IMAGE_EXTENSIONS))
+def is_enabled_extension(file_name: str):
+    return file_name.lower().endswith(tuple(config.FILE_EXTENSIONS_TO_SYNC))
 
 
-def list_photo_files(dbx, path):
-    images = filter(lambda x: is_image(x.name), dbx.files_list_folder(path=path).entries)
-    return map(lambda img: DbxFile(img.name, img.path_display, img.content_hash, img.size), images)
+def list_files_with_enabled_extentions(dbx, path):
+    files = filter(lambda x: is_enabled_extension(x.name), dbx.files_list_folder(path=path).entries)
+    return map(lambda file: DbxFile(file.name, file.path_display, file.content_hash, file.size), files)
 
 
 def has_been_downloaded(connection, dbx_file):
@@ -95,7 +95,7 @@ def handle_config_path(dropbox_token, dropbox_path, fs_path, conn):
     log.info(f"Going with dropbox_path={dropbox_path} and fs_path={fs_path}")
     with dropbox.Dropbox(dropbox_token) as dbx:
         dbx.users_get_current_account()
-        for file in list_photo_files(dbx, dropbox_path):
+        for file in list_files_with_enabled_extentions(dbx, dropbox_path):
             if not has_been_downloaded(conn, file):
                 download(dbx, file, fs_path, conn)
             if should_be_deleted(conn, file):

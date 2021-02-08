@@ -1,3 +1,3 @@
 #!/bin/bash
 
-pipenv run ./app.py >> logs.txt 2>&1
+pipenv run python droppi.py >> logs.txt 2>&1
