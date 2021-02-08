@@ -1,3 +1,4 @@
 #!/bin/bash
 
-pipenv run ./app.py >> logs.txt 2>&1
+cd "$(dirname "$0")"
+pipenv run ./droppi.py >> logs.txt 2>&1

@@ -3,3 +3,4 @@ mytokens.py
 .idea
 .vscode
 db.sqlite
+logs.txt
