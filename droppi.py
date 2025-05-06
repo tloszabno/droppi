@@ -11,6 +11,7 @@ import dropbox
 
 import config
 
+logging.basicConfig()
 log = logging.getLogger(__name__)
 log.setLevel(config.LOG_LEVEL)
 
@@ -28,9 +29,15 @@ def is_enabled_extension(file_name: str):
 
 
 def list_files_with_enabled_extentions(dbx, path):
-    files = filter(lambda x: is_enabled_extension(x.name), dbx.files_list_folder(path=path).entries)
-    return map(lambda file: DbxFile(file.name, file.path_display, file.content_hash, file.size), files)
+    result = dbx.files_list_folder(path=path)
+    all_entries = result.entries
 
+    while result.has_more:
+        result = dbx.files_list_folder_continue(result.cursor)
+        all_entries.extend(result.entries)
+
+    files = filter(lambda x: is_enabled_extension(x.name), all_entries)
+    return map(lambda file: DbxFile(file.name, file.path_display, file.content_hash, file.size), files)
 
 def has_been_downloaded(connection, dbx_file):
     cursor = connection.cursor()
@@ -101,24 +108,37 @@ def handle_config_path(dropbox_token, dropbox_path, fs_path, conn):
             if should_be_deleted(conn, file):
                 delete(dbx, file)
 
+def setup_database(conn):
+    log.info("Creating table if not created before")
+    conn.cursor().execute('''CREATE TABLE IF NOT EXISTS DOWNLOADS
+                (ID           INTEGER PRIMARY KEY AUTOINCREMENT,
+                NAME          TEXT    NOT NULL,
+                REMOTE_PATH   TEXT    NOT NULL,
+                LOCAL_PATH    TEXT    NOT NULL,
+                SIZE          REAL    NOT NULL,
+                HASH          TEXT    NOT NULL,
+                TIMESTAMP     TEXT    NOT NULL);''')
+    conn.commit()
+
+def clear_old_entries_in_db(conn):
+    three_months_ago = (datetime.now() - timedelta(days=90)).strftime('%Y-%m-%d %H:%M:%S')
+    log.info(f"Deleting entries older than {three_months_ago}")
+    curr = conn.cursor()
+    curr.execute("DELETE FROM DOWNLOADS WHERE TIMESTAMP < ?", (three_months_ago,))
+    deleted_rows = curr.rowcount
+    conn.commit()
+    log.info(f"Deleted {deleted_rows} old entries from DOWNLOADS table")
+
 
 def main():
     with sqlite3.connect(config.DB_PATH) as conn:
-        log.info("Creating table if not created before")
-        conn.cursor().execute('''CREATE TABLE IF NOT EXISTS DOWNLOADS
-                  (ID           INTEGER PRIMARY KEY AUTOINCREMENT,
-                  NAME          TEXT    NOT NULL,
-                  REMOTE_PATH   TEXT    NOT NULL,
-                  LOCAL_PATH    TEXT    NOT NULL,
-                  SIZE          REAL    NOT NULL,
-                  HASH          TEXT    NOT NULL,
-                  TIMESTAMP     TEXT    NOT NULL);''')
-        conn.commit()
+        setup_database(conn)
 
         for config_paths in config.PATHS_CONFIGURATION:
             (dropbox_path, fs_path) = config_paths
             handle_config_path(config.DROPBOX_TOKEN, dropbox_path, fs_path, conn)
 
+        clear_old_entries_in_db(conn)
 
 if __name__ == '__main__':
     main()

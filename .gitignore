@@ -4,3 +4,4 @@ mytokens.py
 .vscode
 db.sqlite
 logs.txt
+config.py
